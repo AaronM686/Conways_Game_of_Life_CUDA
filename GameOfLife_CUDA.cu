@@ -64,7 +64,7 @@ testKernel(float *g_idata, float *g_odata)
 
     // TODO: perform your computations here !
     
-    // TODO
+    // TODO more stuff here:
 
     __syncthreads(); // a barrier at which all threads in the block must wait before any is allowed to proceed
     
