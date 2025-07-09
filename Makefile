@@ -7,7 +7,7 @@
 ################################################################################
 
 # Location of the CUDA Toolkit
-CUDA_PATH ?= /usr/local/cuda-11.3
+CUDA_PATH ?= /usr/local/cuda
 
 ##############################
 # start deprecated interface #
@@ -246,13 +246,14 @@ ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDFLAGS))
 ALL_LDFLAGS += $(addprefix -Xlinker ,$(EXTRA_LDFLAGS))
 
 # Common includes and paths for CUDA
-INCLUDES  := -I../../common/inc
+# IMPORTANT: CHANGE THIS PATH if you cannot find <helper_cuda.h>
+INCLUDES  := -I../../cuda-samples/Common
 LIBRARIES :=
 
 ################################################################################
 
 # Gencode arguments
-SMS ?= 52 60 61 70 75 80 86
+SMS ?= 80 86
 
 ifeq ($(SMS),)
 $(info >>> WARNING - no SM architectures have been specified - waiving sample <<<)
