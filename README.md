@@ -1,26 +1,109 @@
 # Conways_Game_of_Life_CUDA
 This is a C++ / CUDA implementation of "Conway's Game of Life" (Cellular Automaton). This is just a coding demonstration of how to do something in CUDA... don't read too much into this.
 
-Yes I know that there are other CUDA implementations of this algorithm that are more advanced and claim to be very fast (some using lookup tables, etc). In this version, the eventual goal is to align towards the Nvidia Jetson architecture for Embedded devices, showing how the constraints of an embedded device drive the design choices. e.g. less Memory than a large RTX3090 would have, but you have Unified (Zero-Copy) memory, etc.
+But this does show how to use "Shared Memory" (https://developer.nvidia.com/blog/using-shared-memory-cuda-cc) to collect intermediate results using on-chip fast memory. Note that this requires a __SyncThreads() call within the CUDA Kernel.
+
+I know that there are other CUDA implementations of this algorithm that are more advanced and claim to be very fast (some using lookup tables, etc). In this version, the eventual goal is to align towards the Nvidia Jetson architecture for Embedded devices, showing how the constraints of an embedded device drive the design choices. e.g. less Memory than a large RTX3090 would have, but you have Unified (Zero-Copy) memory, etc.
+
+## Program output:
+
+When you run the program it generates a text output on the console. It uses the same "starting grid" as my Python example, this will create a series of "toggles" that move bettween two positions, the cycle repeats every-other iteration.
+
+```
+./GameOfLife_CUDA Starting...
+
+GPU Device 0: "Ampere" with compute capability 8.6
+
+Memory Size total: 1008  (18 x 14 x 4)
+Launching CUDA Kernel...
+Processing time: 0.149000 (ms)
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . # . . . . . . . .
+ . . . . . # . . . . . . . .
+ . . . . . # . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . # # . . . . . .
+ . . . . . . # . . . . . . .
+ . . . . . . . . . # . . . .
+ . . . . . . . . # # . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . # . . . .
+ . . . . . . . # . . # . . .
+ . . . . . . . # . . # . . .
+ . . . . . . . . # . . . . .
+ . . . . . . . . . . . . . .
+press Space+Enter to run again, (any other key)+ENTER to exit...
+
+10 Processing time: 0.000000 (ms)
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . # # # . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . # # . . . . . .
+ . . . . . . # # . . . . . .
+ . . . . . . . . # # . . . .
+ . . . . . . . . # # . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . # # # . . .
+ . . . . . . . # # # . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+press Space+Enter to run again, (any other key)+ENTER to exit...
+
+10 Processing time: 0.000000 (ms)
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . # . . . . . . . .
+ . . . . . # . . . . . . . .
+ . . . . . # . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . # # . . . . . .
+ . . . . . . # . . . . . . .
+ . . . . . . . . . # . . . .
+ . . . . . . . . # # . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . . . . . .
+ . . . . . . . . . # . . . .
+ . . . . . . . # . . # . . .
+ . . . . . . . # . . # . . .
+ . . . . . . . . # . . . . .
+ . . . . . . . . . . . . . .
+press Space+Enter to run again, (any other key)+ENTER to exit...
+```
+
+
+## Room for Improvements:
+
+The nature of the algorithm requires an if-then-else branch. This causes Warp Divergence, which should be avoided for best performance. In reality, this branch divergence is small and in this (trivial) example its not a problem. with some creative use of algebra, the if-then-else clause might be eliminated. I've also read that the ternary operator (": ?") might translate to a CUDA primitive instruction that is better, or that it might still cause a branch instruction that's just hidden behind fancy syntax.
+
+For future improvments, I would use OpenCV: it provides convenient helper functions for image input/output. Importantly, the OpenCV Mat objects can be ingested into CUDA kernels, and the CUDA kernel results can be cast back to OpenCV::Mat objects for ease of use. The Jetson devices would likewise have a OpenCV4Tegra implementation you could leverage.
+
 
 ## Setup and Prerequisites:
-You will need a Linux environment with CUDA and OpenCV. I'm using OpenCV becuase its a convenient "helper Library" to save images to disk and display an image to the screen. OpenCV Mat objects can be ingested into CUDA kernels, and the CUDA kernel results can be cast back to OpenCV::Mat objects for ease of use. The Jetson devices would likewise have a OpenCV4Tegra implementation you could leverage.
+You will need a Linux environment with CUDA toolkit.
 
 It is outiside the scope of this project to write a tutorial of how to get CUDA setup and runing on your system, there are plenty of other articles about that already. But I can sympathize, its definitely a hassle with multiple failure points along the way. Last I checked the Docker environments support for GPU acceleration were hit-or-miss. I Don't know about running this on Windows 10/11 but I heard the WSL might support GPU acceleration??? Given all that hassle, I can understand why alot of people just use a cloud solution from AWS or Azure instead, that's what Nvidia does for all of their online tutorial classes.
 
 In the end, you need a system where you can run the "deviceQuery" example and get a successfull ouptut of CUDA enabled device.
 here is the DeviceQuery output from my development machine (RTX 3090):
 ```
-./deviceQuery Starting...
-
  CUDA Device Query (Runtime API) version (CUDART static linking)
 
 Detected 1 CUDA Capable device(s)
 
 Device 0: "NVIDIA GeForce RTX 3090"
-  CUDA Driver Version / Runtime Version          11.4 / 11.3
+  CUDA Driver Version / Runtime Version          12.9 / 12.9
   CUDA Capability Major/Minor version number:    8.6
-  Total amount of global memory:                 24235 MBytes (25411846144 bytes)
+  Total amount of global memory:                 24090 MBytes (25260720128 bytes)
   (082) Multiprocessors, (128) CUDA Cores/MP:    10496 CUDA Cores
   GPU Max Clock rate:                            1740 MHz (1.74 GHz)
   Memory Clock rate:                             9751 Mhz
@@ -55,16 +138,17 @@ Device 0: "NVIDIA GeForce RTX 3090"
   Compute Mode:
      < Default (multiple host threads can use ::cudaSetDevice() with device simultaneously) >
 
-deviceQuery, CUDA Driver = CUDART, CUDA Driver Version = 11.4, CUDA Runtime Version = 11.3, NumDevs = 1
+deviceQuery, CUDA Driver = CUDART, CUDA Driver Version = 12.9, CUDA Runtime Version = 12.9, NumDevs = 1
 Result = PASS
+
 ```
-For convenience I am using my Desktop system with Ubuntu 18 (64-bit) to get an easier development/debugging environment, but I am writing the code in such a way it can easily be coppied-over to the Jetson system with no code changes:
+For convenience I am using my Desktop system with Ubuntu 24 (64-bit) to get an easier development/debugging environment, but I am writing the code in such a way it can easily be coppied-over to the Jetson system with no code changes:
 ```
 $ lsb_release -a
 No LSB modules are available.
 Distributor ID:	Ubuntu
-Description:	Ubuntu 18.04.6 LTS
-Release:	18.04
-Codename:	bionic
+Description:	Ubuntu 24.04.2 LTS
+Release:	24.04
+Codename:	noble
 
 ```
