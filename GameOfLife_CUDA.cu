@@ -32,8 +32,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
-const unsigned int StartingArray_Columns = 18;
-const unsigned int StartingArray_Rows = 14;
+const unsigned int StartingArray_Columns = 14;
+const unsigned int StartingArray_Rows = 18;
 
 void runTest(int argc, char **argv);
 
@@ -65,30 +65,48 @@ testKernel(unsigned int *g_idata, unsigned int *g_odata)
     // Calculate our thread id (x and y) for processing the array
     // Notice we are skipping the first and last row, and first and last columns,
     //  to avoid the boundary edges overruning.
-    unsigned int tid_x = blockIdx.x * blockDim.x + threadIdx.x+1;
-    unsigned int tid_y = blockIdx.y * blockDim.y + threadIdx.y+1;
-
-    // calculate "linearized" indicies into the array: Home, then North, South, East, West neighbors.
-    // (using the OpenCV convention that 0,0 is upper-left of the array, and filled-out as right and then down...)
-    // This is a "convolution kernel" operation and could be done as a loop, but I wanted to unroll it...
+    unsigned int tid_x = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int tid_y = blockIdx.y * blockDim.y + threadIdx.y;
 
     // these _might_ print out in a certain order, but that ordering is _not guarenteed_ (its set by Warp Schedueler)
-    printf("Tid %d[%d,%d]\n",IndxCalc(tid_x,tid_y),tid_x,tid_y); // Debug output: this is slow, need to comment-out later.
+    printf("Tid %d[%d,%d]\n",IndxCalc(tid_x,tid_y),tid_x,tid_y); // Debug output: this is slow, "REMOVE BEFORE FLIGHT"
 
-    // Count the number of live neighbors, this is done into the temporary "Shared Memory" cache.
     sdata[IndxCalc(tid_x,tid_y)] = 0; // initialize to Zero
 
-    // Note that we assume that g_idata is only 0 or 1 values for incrementing our counter correctly, this is enforced later
-    // when we write from the SharedMemory sdata array into the g_odata with logical 0 or 1 only.
-    sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x+1,tid_y+1)];
+    // I _know_ this is bad for Warp Divergence, but there is no "else" path so it shouldn't be too costly...
+    // This guards to make sure we are within the array boundaries, with a margin of 1 edge to avoid overrun.
+    if ((tid_x > 0) && (tid_x < (StartingArray_Columns-1)) && (tid_y > 0) && (tid_y < (StartingArray_Rows -1)))
+    {
+        // Count the number of live neighbors, this is done into the temporary "Shared Memory" cache.
+
+        // calculate "linearized" indicies into the array: Home, then North, South, East, West neighbors.
+        // (using the OpenCV convention that 0,0 is upper-left of the array, and filled-out as right and then down...)
+        // This is a "convolution kernel" operation and could be done as a loop, but I wanted to unroll it...
+
+        // Note that we assume that g_idata is only 0 or 1 values for incrementing our counter correctly, this is enforced later
+        // when we write from the SharedMemory sdata array into the g_odata with logical 0 or 1 only.
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x-1,tid_y-1)];
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x,tid_y-1)];
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x+1,tid_y-1)];
+
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x-1,tid_y)];
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x+1,tid_y)];
+        
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x-1,tid_y+1)];
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x,tid_y+1)];
+        sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x+1,tid_y+1)];
+    } 
+    //notice there is no "else" block, to avoid warp divergence
 
     __syncthreads(); // a barrier at which all threads in the Block must wait before any is allowed to proceed,
     // this ensures all of the shared memory (intermediate results) are "ready" before we continue to calculate the final output.
-    
-    // TODO more stuff here:
 
-    // write output data to global memory
-    g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)] > 3);
+    // DEBUG TEST: just write intermediate data to global memory
+    // g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)]);
+    g_odata[IndxCalc(tid_x,tid_y)] = (g_idata[IndxCalc(tid_x,tid_y)]);
+    
+    // TODO: test criteria based on "number of live neighbors" and write logical 0 or 1 for output:
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -191,10 +209,9 @@ runTest(int argc, char **argv)
     dim3  grid(1, 1, 1); // simplifying assumption since our size is small: it all fits within one Grid block.
 
     // using x to represent which Column index within the Row,
-    // and y to represent Row index. Notice we are discarding the 
-    // first and last row, and first and last columns, to avoid the boundary
-    // edges overruning.
-    dim3  threads(StartingArray_Columns-2, StartingArray_Rows-2, 1);
+    // and y to represent Row index. Internally the code in the Kernel
+    // will guard against overruning the margins of the array.
+    dim3  threads(StartingArray_Columns, StartingArray_Rows, 1);
 
     printf("Launching CUDA Kernel...\n");
 
@@ -238,11 +255,17 @@ runTest(int argc, char **argv)
             //printf(" %u (%u,%u) ",Indx,i,j);
 
             // basic ascii-art style printout of the resulting array.
-            if (h_odata[Indx]) {
-                printf("# ");
-            }
-            else {
-                printf(". ");
+            switch (h_odata[Indx]) {
+                case 0:
+                    printf(".");
+                break;
+                
+                case 1:
+                    printf("#");
+                break;
+
+                default:
+                    printf("%u",h_odata[Indx]);
             }
         }   // end for j 
         printf("\n"); // CR/LF for the next row.
