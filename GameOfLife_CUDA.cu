@@ -69,7 +69,7 @@ testKernel(unsigned int *g_idata, unsigned int *g_odata)
     unsigned int tid_y = blockIdx.y * blockDim.y + threadIdx.y;
 
     // these _might_ print out in a certain order, but that ordering is _not guarenteed_ (its set by Warp Schedueler)
-    printf("Tid %d[%d,%d]\n",IndxCalc(tid_x,tid_y),tid_x,tid_y); // Debug output: this is slow, "REMOVE BEFORE FLIGHT"
+    // printf("Tid %d[%d,%d]\n",IndxCalc(tid_x,tid_y),tid_x,tid_y); // Debug output: this is slow, "REMOVE BEFORE FLIGHT"
 
     sdata[IndxCalc(tid_x,tid_y)] = 0; // initialize to Zero
 
@@ -102,8 +102,8 @@ testKernel(unsigned int *g_idata, unsigned int *g_odata)
     // this ensures all of the shared memory (intermediate results) are "ready" before we continue to calculate the final output.
 
     // DEBUG TEST: just write intermediate data to global memory
-    // g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)]);
-    g_odata[IndxCalc(tid_x,tid_y)] = (g_idata[IndxCalc(tid_x,tid_y)]);
+    g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)]);
+    // g_odata[IndxCalc(tid_x,tid_y)] = (g_idata[IndxCalc(tid_x,tid_y)]);
     
     // TODO: test criteria based on "number of live neighbors" and write logical 0 or 1 for output:
 
@@ -257,15 +257,15 @@ runTest(int argc, char **argv)
             // basic ascii-art style printout of the resulting array.
             switch (h_odata[Indx]) {
                 case 0:
-                    printf(".");
+                    printf(" .");
                 break;
                 
                 case 1:
-                    printf("#");
+                    printf(" #");
                 break;
 
                 default:
-                    printf("%u",h_odata[Indx]);
+                    printf(" %u",h_odata[Indx]);
             }
         }   // end for j 
         printf("\n"); // CR/LF for the next row.
@@ -295,6 +295,6 @@ runTest(int argc, char **argv)
     cudaFree(d_idata);
     cudaFree(d_odata);
 
-    printf("Conways_Game_of_Life_CUDA Done.\n");
+    //printf("Conways_Game_of_Life_CUDA Done.\n");
     exit(bTestResult ? EXIT_SUCCESS : EXIT_FAILURE);
 }
