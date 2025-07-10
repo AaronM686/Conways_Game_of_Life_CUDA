@@ -102,10 +102,20 @@ testKernel(unsigned int *g_idata, unsigned int *g_odata)
     // this ensures all of the shared memory (intermediate results) are "ready" before we continue to calculate the final output.
 
     // DEBUG TEST: just write intermediate data to global memory
-    g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)]);
-    // g_odata[IndxCalc(tid_x,tid_y)] = (g_idata[IndxCalc(tid_x,tid_y)]);
+    // g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)]);
     
-    // TODO: test criteria based on "number of live neighbors" and write logical 0 or 1 for output:
+    // This is very "branchy" but I'm sure with some creative logic you could make it less so...
+    // Test criteria based on "number of live neighbors" and write logical 0 or 1 for output:
+    if (g_idata[IndxCalc(tid_x,tid_y)]){ 
+        // if cell was already alive, then stays alive if neighbors count is 2 or 3
+        g_odata[IndxCalc(tid_x,tid_y)] = ((sdata[IndxCalc(tid_x,tid_y)] == 2) || (sdata[IndxCalc(tid_x,tid_y)] == 3));
+    }
+    else // if not already alive...
+    { // a value of 3, and only a value of 3, makes it become alive:
+        g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)] == 3);
+    }
+    // Note there might be a CUDA primitive for "? :"" syntax statement (ternary operator),
+    //  but not sure if it would really improve runtime,  or just hides the branch behind syntax sugar. 
 
 }
 
@@ -190,6 +200,8 @@ runTest(int argc, char **argv)
     cudaMemcpy(d_idata, h_idata, mem_size_total,
                                cudaMemcpyHostToDevice);
 
+    getLastCudaError("cudaMemcpyHostToDevice");
+
     // allocate device memory for result
     unsigned int *d_odata;
     cudaMalloc((void **) &d_odata, mem_size_total);
@@ -213,88 +225,92 @@ runTest(int argc, char **argv)
     // will guard against overruning the margins of the array.
     dim3  threads(StartingArray_Columns, StartingArray_Rows, 1);
 
-    printf("Launching CUDA Kernel...\n");
-
-    // execute the kernel. AyM Note: the 3rd parameter is Shared Memory allocation size for the CUDA block.
-    // Given this only runs on Maxwell or higher architectures, I don't really need the Shared Memory for working space,
-    //    but keeping it in here just as an example of how to use the feature. 
-    // (My experience is that manually handling Shared Memory is unnecessary on Pascal or above,
-    //      because the automatic cache does good enough.)
-    testKernel<<< grid, threads, mem_size_total >>>(d_idata, d_odata);
-
-    // make sure all kernels finished executing...
-    cudaDeviceSynchronize();
-
-    // check if kernel execution generated and error
-    getLastCudaError("Kernel execution failed");
-
     // allocate mem for the result on host side
     unsigned int *h_odata = 0;
     
     h_odata = (unsigned int *) malloc(mem_size_total);
     assert(h_odata);
 
-    // copy result from device to host
-    cudaMemcpy(h_odata, d_odata, mem_size_total,
-                               cudaMemcpyDeviceToHost);
+    printf("Launching CUDA Kernel...\n");
 
-    // check if memcopy generated and error
-    getLastCudaError("cudaMemcpyDeviceToHost");
+    char KeyPress = 0;
+    do
+        {
 
-    sdkStopTimer(&timer);
-    printf("Processing time: %f (ms)\n", sdkGetTimerValue(&timer));
-    sdkDeleteTimer(&timer);
+        // execute the kernel. AyM Note: the 3rd parameter is Shared Memory allocation size for the CUDA block.
+        // Given this only runs on Maxwell or higher architectures, I don't really need the Shared Memory for working space,
+        //    but keeping it in here just as an example of how to use the feature. 
+        // (My experience is that manually handling Shared Memory is unnecessary on Pascal or above,
+        //      because the automatic cache does good enough.)
+        testKernel<<< grid, threads, mem_size_total >>>(d_idata, d_odata);
 
-    for (int j = 0; j < StartingArray_Rows; j++) {
-        // printf("Row %u: ",j);
-        for (int i = 0; i < StartingArray_Columns; i++)
-        {   
-            unsigned int Indx = j*StartingArray_Columns + i;
+        // make sure all kernels finished executing...
+        cudaDeviceSynchronize();
 
-            assert(Indx < mem_size_total);
-            //printf(" %u (%u,%u) ",Indx,i,j);
+        // check if kernel execution generated and error
+        getLastCudaError("Kernel execution failed");
 
-            // basic ascii-art style printout of the resulting array.
-            switch (h_odata[Indx]) {
-                case 0:
-                    printf(" .");
-                break;
-                
-                case 1:
-                    printf(" #");
-                break;
 
-                default:
-                    printf(" %u",h_odata[Indx]);
-            }
-        }   // end for j 
-        printf("\n"); // CR/LF for the next row.
-    } // end for i
+        // copy result from device to host
+        cudaMemcpy(h_odata, d_odata, mem_size_total,
+                                cudaMemcpyDeviceToHost);
 
-    // compute reference solution
-    unsigned int *reference = (unsigned int *) malloc(mem_size_total);
-    computeTick(reference, h_idata, mem_size_total);
+        // check if memcopy generated and error
+        getLastCudaError("cudaMemcpyDeviceToHost");
 
-    // check result
-    //if (checkCmdLineFlag(argc, (const char **) argv, "regression"))
-    //{
-    //    // write file for regression test
-    //    sdkWriteFile("./data/regression.dat", h_odata, num_threads, 0.0f, false);
-    //}
-    //else
-    //{
-    //    // custom output handling when no regression test running
-    //    // in this case check if the result is equivalent to the expected solution
-    //    bTestResult = compareData(reference, h_odata, num_threads, 0.0f, 0.0f);
-    //}
+        sdkStopTimer(&timer);
+        printf("Processing time: %f (ms)\n", sdkGetTimerValue(&timer));
+        sdkDeleteTimer(&timer);
+
+        for (int j = 0; j < StartingArray_Rows; j++) {
+            // printf("Row %u: ",j);
+            for (int i = 0; i < StartingArray_Columns; i++)
+            {   
+                unsigned int Indx = j*StartingArray_Columns + i;
+
+                assert(Indx < mem_size_total);
+                //printf(" %u (%u,%u) ",Indx,i,j);
+
+                // basic ascii-art style printout of the resulting array.
+                switch (h_odata[Indx]) {
+                    case 0:
+                        printf(" .");
+                    break;
+                    
+                    case 1:
+                        printf(" #");
+                    break;
+
+                    default:
+                        printf(" %u",h_odata[Indx]);
+                }
+            }   // end for j 
+            printf("\n"); // CR/LF for the next row.
+        } // end for i
+
+        // Copy output back to the input incase we want to iterate again:
+        // copy device memory to another device memory....
+        // (Hmm.. for some reason I couldn't get cuda Device-to-Device memcpy to work the way I expected...)
+        cudaMemcpy(d_idata, h_odata, mem_size_total,
+                                cudaMemcpyHostToDevice);
+        getLastCudaError("cudaMemcpyHostToDevice");
+        
+
+        printf("press Enter to run again, (any other key)+ENTER to exit...\n");
+
+        KeyPress = getchar(); // scanf("%c\n",&KeyPress);
+        printf("%d ",(int)KeyPress);
+
+    } while ((KeyPress == 32) || (KeyPress == 10)); // bash cmd line can be a little weird when reading single character...
+    
 
     // cleanup memory
     free(h_idata);
     free(h_odata);
-    free(reference);
+    // free(reference);
     cudaFree(d_idata);
     cudaFree(d_odata);
 
-    //printf("Conways_Game_of_Life_CUDA Done.\n");
+    printf("Conways_Game_of_Life_CUDA Done.\n");
     exit(bTestResult ? EXIT_SUCCESS : EXIT_FAILURE);
 }
