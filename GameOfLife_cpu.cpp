@@ -13,7 +13,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // export C interface
 extern "C"
-void computeTick(float *reference, float *idata, const unsigned int len);
+void computeTick(unsigned int *reference, unsigned int *idata, const unsigned int len);
 
 ////////////////////////////////////////////////////////////////////////////////
 //! Compute reference data set
@@ -23,7 +23,7 @@ void computeTick(float *reference, float *idata, const unsigned int len);
 //! @param len        number of elements in reference / idata
 ////////////////////////////////////////////////////////////////////////////////
 void
-computeTick(float *reference, float *idata, const unsigned int len)
+computeTick(unsigned int *reference, unsigned int *idata, const unsigned int len)
 {
 	// printf("computeTick: not implemented yet\n");
 }

@@ -32,10 +32,20 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
+const unsigned int StartingArray_Columns = 18;
+const unsigned int StartingArray_Rows = 14;
+
 void runTest(int argc, char **argv);
 
+// OpenCV Mat object would do this for me internaly, but to avoid
+// a build dependency on OpenCV toolkit I just made my own simplified version here:
+inline __device__ int IndxCalc(unsigned int Col_x, unsigned int Row_y){
+    return (Row_y*StartingArray_Columns + Col_x);
+}
+
 extern "C"
-void computeTick(float *reference, float *idata, const unsigned int len);
+void computeTick(unsigned int *reference, unsigned int *idata, const unsigned int len);
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //! Simple test kernel for device functionality
@@ -43,35 +53,42 @@ void computeTick(float *reference, float *idata, const unsigned int len);
 //! @param g_odata  output data in global memory
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void
-testKernel(float *g_idata, float *g_odata)
+testKernel(unsigned int *g_idata, unsigned int *g_odata)
 {
     // shared memory, just for demonstration (we don't really use it here)
     // the size is determined by the host application
     extern  __shared__  float sdata[]; // AyM: The size of this is determiend by the 3rd paramter of the Kernel invocation.
 
-    // access number of threads in this block
-    const unsigned int num_threads = blockDim.x; // AyM: Need to update this for a 2-dimensional thread block.
+    // just checking, the number of threads in this block:
+    // const unsigned int num_threads = blockDim.x*blockDim.y;
 
-    // Calculate our thread id
-    const unsigned int tid = num_threads*threadIdx.y + threadIdx.x; // AyM: Need to update this for a 2-dimensional thread block.
+    // Calculate our thread id (x and y) for processing the array
+    // Notice we are skipping the first and last row, and first and last columns,
+    //  to avoid the boundary edges overruning.
+    unsigned int tid_x = blockIdx.x * blockDim.x + threadIdx.x+1;
+    unsigned int tid_y = blockIdx.y * blockDim.y + threadIdx.y+1;
 
-    // read in input data from global memory
-    sdata[tid] = g_idata[tid];
-    __syncthreads(); // a barrier at which all threads in the Block must wait before any is allowed to proceed
+    // calculate "linearized" indicies into the array: Home, then North, South, East, West neighbors.
+    // (using the OpenCV convention that 0,0 is upper-left of the array, and filled-out as right and then down...)
+    // This is a "convolution kernel" operation and could be done as a loop, but I wanted to unroll it...
 
     // these _might_ print out in a certain order, but that ordering is _not guarenteed_ (its set by Warp Schedueler)
-    printf("Tid %d (%d,%d,%d)\n",tid,threadIdx.x,threadIdx.y,threadIdx.z); // Debug output: this is slow, need to comment-out later.
+    printf("Tid %d[%d,%d]\n",IndxCalc(tid_x,tid_y),tid_x,tid_y); // Debug output: this is slow, need to comment-out later.
 
-    // TODO: perform your computations here !
+    // Count the number of live neighbors, this is done into the temporary "Shared Memory" cache.
+    sdata[IndxCalc(tid_x,tid_y)] = 0; // initialize to Zero
+
+    // Note that we assume that g_idata is only 0 or 1 values for incrementing our counter correctly, this is enforced later
+    // when we write from the SharedMemory sdata array into the g_odata with logical 0 or 1 only.
+    sdata[IndxCalc(tid_x,tid_y)] += g_idata[IndxCalc(tid_x+1,tid_y+1)];
+
+    __syncthreads(); // a barrier at which all threads in the Block must wait before any is allowed to proceed,
+    // this ensures all of the shared memory (intermediate results) are "ready" before we continue to calculate the final output.
     
     // TODO more stuff here:
 
-    __syncthreads(); // a barrier at which all threads in the block must wait before any is allowed to proceed
-    
-    // note: you must have the synctreads() barrier if you are going to use SharedMemory block, to ensure all processing is done.
-
-    // write data to global memory
-    g_odata[tid] = sdata[tid];
+    // write output data to global memory
+    g_odata[IndxCalc(tid_x,tid_y)] = (sdata[IndxCalc(tid_x,tid_y)] > 3);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -101,17 +118,40 @@ runTest(int argc, char **argv)
     sdkCreateTimer(&timer);
     sdkStartTimer(&timer);
 
-    unsigned int array_dimension = 4; // AyM: using this a dimensions for a 2-dimensional thread block.
-    size_t mem_size_total = sizeof(float) * array_dimension * array_dimension;
+    // This is the same starting array as my Python notebook, it will setup several repeating patterns.
+    // total array size is 252, dimension are 18 rows x 14 columns.
+
+
+    const unsigned int StartingArray_c[StartingArray_Columns*StartingArray_Rows] = 
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,1,1,1,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,1,1,0,0,0,0,0,0, \
+    0,0,0,0,0,0,1,1,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,1,1,0,0,0,0, \
+    0,0,0,0,0,0,0,0,1,1,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0, \
+    0,0,0,0,0,0,0,0,1,1,1,0,0,0, \
+    0,0,0,0,0,0,0,1,1,1,0,0,0,0, \
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,\
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
+    size_t mem_size_total = sizeof(unsigned int) * 18 * 14;
 
     // doing a check here becuase I was getting a compiler warning about memory sizes...
-    printf("Memory Size total: %lu  (%u x %u x %lu)\n",mem_size_total,array_dimension,array_dimension,sizeof(float));
+    printf("Memory Size total: %lu  (%u x %u x %lu)\n",mem_size_total,18,14,sizeof(unsigned int));
 
     // pointer to allocate host memory
-    float *h_idata = 0;
+    unsigned int *h_idata = 0;
     
     // allocate the host memory
-    h_idata = (float *) malloc(mem_size_total);
+    h_idata = (unsigned int *) malloc(mem_size_total);
 
     if (h_idata == 0){
         printf("host side malloc failed!\n");
@@ -119,12 +159,13 @@ runTest(int argc, char **argv)
     }
 
     // initalize the memory
-    memset(h_idata,0,mem_size_total);
+    //memset(h_idata,0,mem_size_total);
+    memcpy(h_idata,StartingArray_c,mem_size_total);
     
     // allocate device memory
     // Note I allocate this as a Linear array, but treat it as a 2d matrix later
     // TODO: use OpenCV Mat for this would be alot easier...
-    float *d_idata;
+    unsigned int *d_idata;
     cudaMalloc((void **) &d_idata, mem_size_total);
     
     // copy host memory to device
@@ -132,7 +173,7 @@ runTest(int argc, char **argv)
                                cudaMemcpyHostToDevice);
 
     // allocate device memory for result
-    float *d_odata;
+    unsigned int *d_odata;
     cudaMalloc((void **) &d_odata, mem_size_total);
     
     // check if memory created
@@ -140,21 +181,28 @@ runTest(int argc, char **argv)
 
 
     // initialize to all zeros, 
-    // this must be initialized to Zero for the algorithm to work properly
+    // the output array must be initialized to Zero for the algorithm to work properly
     cudaMemset(d_odata,0,mem_size_total);
-
-    // setup execution parameters
-    dim3  grid(1, 1, 1);
-    dim3  threads(array_dimension, array_dimension, 1);
 
     // check if memory set
     getLastCudaError("CUDA Memset");
 
+    // setup execution parameters
+    dim3  grid(1, 1, 1); // simplifying assumption since our size is small: it all fits within one Grid block.
+
+    // using x to represent which Column index within the Row,
+    // and y to represent Row index. Notice we are discarding the 
+    // first and last row, and first and last columns, to avoid the boundary
+    // edges overruning.
+    dim3  threads(StartingArray_Columns-2, StartingArray_Rows-2, 1);
 
     printf("Launching CUDA Kernel...\n");
 
     // execute the kernel. AyM Note: the 3rd parameter is Shared Memory allocation size for the CUDA block.
-    // Given this only runs on Maxwell or higher architectures, do I really need the Shared Memory anymore?
+    // Given this only runs on Maxwell or higher architectures, I don't really need the Shared Memory for working space,
+    //    but keeping it in here just as an example of how to use the feature. 
+    // (My experience is that manually handling Shared Memory is unnecessary on Pascal or above,
+    //      because the automatic cache does good enough.)
     testKernel<<< grid, threads, mem_size_total >>>(d_idata, d_odata);
 
     // make sure all kernels finished executing...
@@ -164,18 +212,45 @@ runTest(int argc, char **argv)
     getLastCudaError("Kernel execution failed");
 
     // allocate mem for the result on host side
-    float *h_odata = (float *) malloc(mem_size_total);
+    unsigned int *h_odata = 0;
+    
+    h_odata = (unsigned int *) malloc(mem_size_total);
+    assert(h_odata);
+
     // copy result from device to host
-    cudaMemcpy(h_odata, d_odata, sizeof(float) * mem_size_total,
+    cudaMemcpy(h_odata, d_odata, mem_size_total,
                                cudaMemcpyDeviceToHost);
+
+    // check if memcopy generated and error
+    getLastCudaError("cudaMemcpyDeviceToHost");
 
     sdkStopTimer(&timer);
     printf("Processing time: %f (ms)\n", sdkGetTimerValue(&timer));
     sdkDeleteTimer(&timer);
 
+    for (int j = 0; j < StartingArray_Rows; j++) {
+        // printf("Row %u: ",j);
+        for (int i = 0; i < StartingArray_Columns; i++)
+        {   
+            unsigned int Indx = j*StartingArray_Columns + i;
+
+            assert(Indx < mem_size_total);
+            //printf(" %u (%u,%u) ",Indx,i,j);
+
+            // basic ascii-art style printout of the resulting array.
+            if (h_odata[Indx]) {
+                printf("# ");
+            }
+            else {
+                printf(". ");
+            }
+        }   // end for j 
+        printf("\n"); // CR/LF for the next row.
+    } // end for i
+
     // compute reference solution
-    float *reference = (float *) malloc(mem_size_total);
-    computeTick(reference, h_idata, array_dimension);
+    unsigned int *reference = (unsigned int *) malloc(mem_size_total);
+    computeTick(reference, h_idata, mem_size_total);
 
     // check result
     //if (checkCmdLineFlag(argc, (const char **) argv, "regression"))
